@@ -70,11 +70,14 @@ calendar price, seasonal premium, booked-night count, or occupancy outcome is im
 
 ## Reproduction and limits
 
-`scripts/prepare_data.R` reads both gzip files, validates IDs and listing-date
+The `prepare-real-data` R chunk in `AirBnB_Price_Difference.qmd` reads both gzip files, validates IDs and listing-date
 uniqueness, checks calendar joins and availability coding, parses prices, and writes
 the subsets. It reads UTF-8 text without conversion through the Windows locale.
-`scripts/make_figures.R` regenerates both figures, the report, and summary CSV from
-the committed listing subset. Only base R is required.
+The remaining R chunks regenerate both figures and the summary CSV, and the
+QMD combines these with write-ups containing inline R statistics. All code is
+in the QMD, with no external R scripts. Default rendering uses the committed
+subset; `refresh_data:true` rebuilds it from the gzip files. Data processing and
+plotting use base R; rendering needs Quarto, knitr, rmarkdown, and XeLaTeX.
 
 These are descriptive, cross-sectional visualizations. Advertised quote levels
 do not measure seasonal stability, transactions, revenue, or causal effects.

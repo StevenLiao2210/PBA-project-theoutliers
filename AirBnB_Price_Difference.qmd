@@ -1,0 +1,210 @@
+---
+title: "Do Minimum-Stay Requirements Relate to Seasonal Airbnb Price Differences in Taipei?"
+subtitle: "Group 4 - Data visualization milestone"
+format:
+  pdf:
+    pdf-engine: xelatex
+    documentclass: article
+    papersize: a4
+    fontsize: 10pt
+    geometry: margin=0.7in
+    colorlinks: true
+    toc: false
+    fig-pos: H
+execute:
+  echo: false
+  warning: false
+  message: false
+  cache: false
+params:
+  raw_dir: "data/raw"
+  refresh_data: false
+  download_raw: false
+editor: source
+---
+
+```{r}
+#| label: setup
+#| include: false
+# All preparation and plotting code is in this document; no external R scripts.
+# Default: render from the committed small data subset.
+# Rebuild: -P refresh_data:true -P raw_dir:"folder/containing/both/gzip/files"
+# Download and rebuild: -P download_raw:true -P refresh_data:true
+dir.create("data/processed", recursive = TRUE, showWarnings = FALSE)
+dir.create("output/figures", recursive = TRUE, showWarnings = FALSE)
+raw_dir <- params$raw_dir
+if (isTRUE(params$download_raw)) {
+  dir.create(raw_dir, recursive = TRUE, showWarnings = FALSE)
+  base_url <- "https://data.insideairbnb.com/taiwan/northern-taiwan/taipei/2026-09-28/data/"
+  for (name in c("listings.csv.gz", "calendar.csv.gz")) {
+    target <- file.path(raw_dir, name)
+    if (!file.exists(target)) download.file(paste0(base_url, name), target, mode = "wb")
+  }
+}
+rebuild <- isTRUE(params$refresh_data) ||
+  !all(file.exists(file.path("data/processed", c("listings_subset.csv", "audit.csv", "calendar_monthly.csv"))))
+```
+
+```{r}
+#| label: prepare-real-data
+#| include: false
+if (rebuild) {
+  dir.create("data/processed", recursive = TRUE, showWarnings = FALSE)
+  read_gz <- function(path) {
+    # Preserve UTF-8 bytes instead of transcoding through the Windows locale.
+    con <- gzfile(path, "rt")
+    on.exit(close(con))
+    read.csv(con, colClasses = "character", check.names = FALSE,
+             na.strings = c("", "NA"), encoding = "UTF-8")
+  }
+  listings_path <- file.path(raw_dir, "listings.csv.gz")
+  calendar_path <- file.path(raw_dir, "calendar.csv.gz")
+  stopifnot(file.exists(listings_path), file.exists(calendar_path))
+  l <- read_gz(listings_path)
+  c <- read_gz(calendar_path)
+  needed <- c("id", "last_scraped", "minimum_nights", "price", "room_type",
+              "neighbourhood_cleansed", "accommodates", "price_quote_raw",
+              "price_quote_checkin_date", "price_quote_checkout_date")
+  stopifnot(all(needed %in% names(l)), all(c("listing_id", "date", "available", "minimum_nights", "maximum_nights") %in% names(c)))
+  stopifnot(!anyNA(l$id), !anyDuplicated(l$id))
+  stopifnot(!anyNA(c$listing_id), !anyNA(c$date),
+            !anyDuplicated(c[c("listing_id", "date")]), all(c$listing_id %in% l$id),
+            all(c$available %in% c("t", "f")))
+  minimum <- suppressWarnings(as.integer(l$minimum_nights))
+  valid_minimum <- !is.na(minimum) & minimum >= 1
+  price <- suppressWarnings(as.numeric(gsub("[$,]", "", l$price)))
+  currency <- rep(NA_character_, nrow(l))
+  has_currency <- !is.na(l$price_quote_raw) & grepl('"currency"\\s*:', l$price_quote_raw)
+  currency[has_currency] <- sub('.*"currency"\\s*:\\s*"([^"]+)".*', '\\1', l$price_quote_raw[has_currency])
+  valid_price <- is.finite(price) & price > 0 & !is.na(currency) & currency == "TWD"
+  group <- ifelse(!valid_minimum, NA, ifelse(minimum <= 2, "1-2 nights", ifelse(minimum <= 6, "3-6 nights", "7+ nights")))
+  d <- data.frame(listing_id = l$id, last_scraped = l$last_scraped,
+    minimum_nights = minimum, stay_group = group, room_type = l$room_type,
+    neighbourhood_cleansed = l$neighbourhood_cleansed,
+    accommodates = suppressWarnings(as.integer(l$accommodates)),
+    quoted_nightly_price_twd = ifelse(valid_price, price, NA_real_),
+    quote_currency = currency, quote_checkin = l$price_quote_checkin_date,
+    quote_checkout = l$price_quote_checkout_date,
+    quote_stay_nights = as.integer(as.Date(l$price_quote_checkout_date) - as.Date(l$price_quote_checkin_date)),
+    stringsAsFactors = FALSE)
+  write.csv(d, "data/processed/listings_subset.csv", row.names = FALSE, na = "", fileEncoding = "UTF-8")
+  month <- substr(c$date, 1, 7)
+  monthly <- do.call(rbind, lapply(sort(unique(month)), function(m) {
+    z <- c[month == m, ]
+    data.frame(month = m, calendar_rows = nrow(z), listings = length(unique(z$listing_id)),
+      dates = length(unique(z$date)), available_rows = sum(z$available == "t"))
+  }))
+  write.csv(monthly, "data/processed/calendar_monthly.csv", row.names = FALSE)
+  audit <- data.frame(metric = c("listings", "calendar_rows", "calendar_listings", "calendar_start", "calendar_end",
+      "duplicate_listing_ids", "duplicate_listing_dates", "invalid_minimum_nights",
+      "valid_positive_twd_prices", "missing_or_invalid_or_non_twd_prices", "calendar_has_price",
+      "raw_listings_md5", "raw_calendar_md5"),
+    value = c(nrow(l), nrow(c), length(unique(c$listing_id)), min(c$date), max(c$date), 0, 0,
+      sum(!valid_minimum), sum(valid_price), sum(!valid_price), "price" %in% names(c),
+      unname(tools::md5sum(listings_path)), unname(tools::md5sum(calendar_path))))
+  write.csv(audit, "data/processed/audit.csv", row.names = FALSE)
+  writeLines(c("Calendar columns:", paste(names(c), collapse = ", "),
+               "Calendar contains no date-level prices in this supplied release."), "data/processed/schema_note.txt")
+  rm(l, c)
+}
+```
+
+```{r}
+#| label: descriptive-summaries
+#| include: false
+d <- read.csv("data/processed/listings_subset.csv", colClasses = c(listing_id = "character"),
+              na.strings = "", encoding = "UTF-8")
+levels_group <- c("1-2 nights", "3-6 nights", "7+ nights")
+d$stay_group <- factor(d$stay_group, levels = levels_group)
+counts <- table(d$stay_group)
+good <- !is.na(d$stay_group) & is.finite(d$quoted_nightly_price_twd) & d$quoted_nightly_price_twd > 0
+p <- d[good, ]
+prices <- split(p$quoted_nightly_price_twd, p$stay_group)
+med <- vapply(prices, median, numeric(1))
+ns <- vapply(prices, length, integer(1))
+stats <- data.frame(stay_group = levels_group, listings = as.integer(counts),
+  share_percent = 100 * as.integer(counts) / sum(counts), valid_price_n = ns,
+  median_twd = med, q1_twd = vapply(prices, quantile, numeric(1), probs = .25),
+  q3_twd = vapply(prices, quantile, numeric(1), probs = .75), row.names = NULL)
+write.csv(stats, "data/processed/figure_summary.csv", row.names = FALSE)
+fmt <- function(x) format(round(x), big.mark = ",", trim = TRUE, scientific = FALSE)
+colours <- c("#257F8E", "#4979AF", "#C47A35")
+setup <- function() par(mar = c(4.8, 6.0, 1, 1), mgp = c(3.7, .8, 0),
+                       family = "sans", col.axis = "#364457", col.lab = "#364457", las = 1)
+draw_minimum <- function() {
+  setup()
+  at <- barplot(counts, col = colours, border = NA, ylim = c(0, max(counts) * 1.22),
+          ylab = "Number of listings", xlab = "Listing-level minimum-stay requirement", axes = FALSE)
+  axis(2, at = seq(0, 3500, 500), labels = fmt(seq(0, 3500, 500)), tick = FALSE)
+  text(at, as.numeric(counts), labels = paste0(fmt(counts), " (", sprintf("%.1f", stats$share_percent), "%)"),
+       pos = 3, cex = .95, col = "#203047")
+  box(bty = "n")
+}
+draw_prices <- function() {
+  setup()
+  boxplot(prices, log = "y", col = colours, border = "#3D4855", outline = TRUE,
+    pch = 16, cex = .35, ylab = "Nightly quote (TWD, log)",
+    xlab = "Listing-level minimum-stay requirement", yaxt = "n", xaxt = "n")
+  axis(1, at = 1:3, labels = paste0(levels_group, "\n", "n = ", fmt(ns)), tick = FALSE)
+  ticks <- c(100, 300, 1000, 3000, 10000, 30000, 100000, 300000, 1000000)
+  ticks <- ticks[ticks >= min(p$quoted_nightly_price_twd) & ticks <= max(p$quoted_nightly_price_twd)]
+  axis(2, at = ticks, labels = fmt(ticks), tick = FALSE, cex.axis = .85)
+  box(bty = "l", col = "#CCD3DB")
+}
+for (i in 1:2) {
+  png(sprintf("output/figures/figure_%d.png", i), width = 1800, height = 1050, res = 200)
+  if (i == 1) draw_minimum() else draw_prices()
+  dev.off()
+}
+audit <- read.csv("data/processed/audit.csv", colClasses = "character")
+audit_value <- function(key) audit$value[match(key, audit$metric)]
+valid_rule <- !is.na(d$stay_group)
+valid_price <- is.finite(d$quoted_nightly_price_twd) & d$quoted_nightly_price_twd > 0
+money <- function(x) format(round(x, 2), nsmall = 2, big.mark = ",", trim = TRUE)
+share <- function(i) sprintf("%.1f", stats$share_percent[i])
+stopifnot(all(counts > 0), all(ns > 0), nrow(d) == as.integer(audit_value("listings")))
+```
+
+## Research question and data
+
+Do Taipei Airbnb listings with longer minimum-night requirements exhibit smaller seasonal differences in advertised nightly prices? We hypothesize that listings targeting longer stays may maintain more stable prices. This is an observational question about association.
+
+We use Inside Airbnb's September 28, 2026 Taipei release: **`r fmt(nrow(d))` listings** scraped September 28-29. These figures provide a first look at minimum-stay rules and quoted price levels; no model or main seasonal analysis has been run.
+
+## Figure 1: Minimum-stay requirements
+
+```{r}
+#| label: fig-minimum-stays
+#| fig-cap: "Minimum-stay groups in the Taipei snapshot. Percentages use listings with valid minimum-stay rules. Source: Inside Airbnb; team calculations."
+#| fig-width: 7
+#| fig-height: 3.2
+draw_minimum()
+```
+
+**What stands out.** Of `r fmt(sum(counts))` listings with valid rules, `r fmt(counts[1])` (`r share(1)`%) require 1-2 nights, `r fmt(counts[2])` (`r share(2)`%) require 3-6 nights, and `r fmt(counts[3])` (`r share(3)`%) require at least 7 nights. Requirements cluster at 1 night (`r fmt(sum(d$minimum_nights == 1, na.rm = TRUE))` listings), 2 nights (`r fmt(sum(d$minimum_nights == 2, na.rm = TRUE))`), and 30 nights (`r fmt(sum(d$minimum_nights == 30, na.rm = TRUE))`). There are `r fmt(sum(d$minimum_nights >= 28, na.rm = TRUE))` listings requiring at least 28 nights. The `r fmt(sum(!valid_rule))` listing with a missing rule is excluded.
+
+**Why it matters.** Substantial variation in minimum stays makes it worth asking whether listings targeting different stay lengths also differ in seasonal pricing. Each proposed group contains over a thousand listings before price filtering. With date-level prices, we would compare the same listing across periods and relate its percentage price difference to these groups, accounting for neighbourhood, room type, and guest capacity. The broad 7+ group combines weekly and monthly policies, so we would also consider separating them.
+
+\newpage
+
+## Figure 2: Quoted nightly prices
+
+```{r}
+#| label: fig-quoted-prices
+#| fig-cap: "Quoted nightly prices by minimum-stay group. Boxes show the middle half; dots lie beyond the 1.5-IQR whiskers. All eligible prices are retained on a log axis. Source: Inside Airbnb; team calculations."
+#| fig-width: 7
+#| fig-height: 3.2
+draw_prices()
+```
+
+**What stands out.** Among `r fmt(nrow(p))` listings with both a valid rule and a positive TWD quote, median nightly prices are **TWD `r money(med[1])`** for 1-2-night requirements, **TWD `r money(med[2])`** for 3-6 nights, and **TWD `r money(med[3])`** for 7+ nights. The 7+ group has a lower median, but the distributions overlap and include long upper tails. The log axis makes this spread visible. Of `r fmt(nrow(d))` original listings, `r fmt(sum(!valid_price))` lack a usable price and `r fmt(sum(valid_price & !valid_rule))` further listing lacks a valid rule. No otherwise eligible positive prices are trimmed.
+
+**Why it matters.** The spread and overlap motivate a paired comparison and attention to skewness. These quotes have differing check-in dates and stay lengths, and may incorporate long-stay discounts. Differences in price levels therefore do **not** measure seasonal stability or establish that minimum stays cause price differences. A future paired analysis needs usable advertised prices for each listing in both comparison periods.
+
+## Feasibility and next step
+
+The supplied calendar contains **`r fmt(as.integer(audit_value("calendar_rows")))` listing-date rows** for `r fmt(as.integer(audit_value("calendar_listings")))` listings, spanning `r audit_value("calendar_start")` through `r audit_value("calendar_end")`. It contains listing ID, date, availability, and minimum/maximum nights, but **no price column**. The planned December 2026 versus August 2027 comparison cannot be calculated from these files. We must obtain date-level advertised prices or revise the question before the main analysis. Availability is not a price or a reliable booking measure; unavailable dates may be host-blocked. We will verify demand patterns before calling either month high or low season.
+
+## Source
+
+Inside Airbnb. (2026). *Taipei: detailed listings and calendar data, September 28, 2026 release*. [Get the data](https://insideairbnb.com/get-the-data/); [data assumptions](https://insideairbnb.com/data-assumptions/). CC BY 4.0. Figures and summaries are team transformations. See the codebook beside the compact data in `data/processed/CODEBOOK.md`.
