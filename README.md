@@ -6,7 +6,7 @@ Steven Ernest Muliawan 112006224
 Julianna Villa Real 111006214
 Samuel Bradley Winata 112006225
 
-## Data visualization milestone
+## Milestone 3: Exploratory Data Visualization
 
 Research question: **Do Taipei Airbnb listings with longer minimum-stay
 requirements exhibit smaller seasonal differences in advertised nightly prices?**
@@ -16,9 +16,12 @@ All R code and write-ups are in the existing
 The submission is [the rendered PDF](AirBnB_Price_Difference.pdf).
 It includes two figures built from the real September 28, 2026 Taipei release:
 
-1. Listing counts by minimum-stay group.
-2. Quoted nightly price distributions by minimum-stay group, with a logarithmic
-   price axis and every eligible positive-price observation retained.
+1. Histogram of quoted nightly prices (5,868 listings).
+2. Boxplots of quoted prices by minimum-stay group (5,867 listings).
+
+Both use straightforward `ggplot2` styling, logarithmic price axes, and all eligible
+positive-price observations. The QMD uses `dplyr` pipelines for cleaning, filtering,
+grouping, and summaries.
 
 Each figure has a short interpretation and an explanation of its relevance to the
 planned analysis. There are no fitted models or hypothesis tests.
@@ -32,8 +35,14 @@ quotes with differing dates and stay lengths, and does not claim seasonal effect
 ### Reproduce the submission from the committed subset
 
 Open the QMD in RStudio and click **Render**, or run the following from the repo
-root. You need R, the R packages `knitr` and `rmarkdown`, Quarto, and XeLaTeX
-(for example, a TinyTeX installation). Data preparation and plotting use base R.
+root. You need R, the R packages `knitr`, `rmarkdown`, `dplyr`, and `ggplot2`,
+Quarto, and XeLaTeX (for example, a TinyTeX installation).
+
+Install missing R packages once with:
+
+```r
+install.packages(c("knitr", "rmarkdown", "dplyr", "ggplot2"))
+```
 
 ```sh
 quarto render AirBnB_Price_Difference.qmd
@@ -45,6 +54,10 @@ It also exports PNGs under `output/figures/` and descriptive statistics under
 `data/processed/figure_summary.csv`. By default it uses the committed small subset
 and does not need the large raw downloads. The PDF hides code for readability;
 all code remains visible and editable inside the QMD.
+
+`data/processed/price_distribution_summary.csv` contains the overall price
+distribution statistics used in the Figure 1 interpretation. Inline R keeps the
+reported counts, medians, and percentages tied to the data.
 
 ### Rebuild the smaller files from the original downloads
 
@@ -75,6 +88,16 @@ See [the codebook next to the processed data](data/processed/CODEBOOK.md) for fi
 definitions, units, exclusions, file fingerprints, and limitations. The committed
 subsets and all figure outputs can be regenerated from the QMD. Its YAML parameters
 control whether it rebuilds the subset or uses the committed version.
+
+For the handoff's standalone R data-preparation entry point:
+
+```sh
+Rscript scripts/prepare_data.R data/raw
+```
+
+This small entry point executes the `setup` and `prepare-real-data` chunks from
+the QMD. The preparation logic remains in the QMD, rather than in a second copy
+that could drift. It writes the compact data and audits without rendering the PDF.
 
 ### Source and attribution
 

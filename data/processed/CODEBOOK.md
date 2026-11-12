@@ -30,11 +30,13 @@ and coordinates are omitted. Empty CSV cells mean missing values.
 | quote_checkout | YYYY-MM-DD | Source `price_quote_checkout_date`. |
 | quote_stay_nights | Integer nights | Checkout minus check-in. Quotes can cover different stay lengths and incorporate discounts. |
 
-Figure 1 retains **6,366** listings with a positive valid minimum-stay rule.
+Figure 1 retains **5,868** listings with a positive TWD quote, regardless of whether
+the minimum-stay rule is present.
 Figure 2 retains **5,867** listings with both a valid rule and a positive TWD price.
 There are **499 missing/unusable prices**, plus one additional listing with a
 valid price but a missing rule. No eligible positive prices are winsorized,
-trimmed, or dropped as outliers. Shares in Figure 1 use 6,366 as denominator.
+trimmed, or dropped as outliers. The minimum-stay group counts in the data overview
+and summary CSV use 6,366 valid rules as denominator.
 
 ## calendar_monthly.csv
 
@@ -63,10 +65,13 @@ calendar price, seasonal premium, booked-night count, or occupancy outcome is im
 - `schema_note.txt`: records the raw calendar columns and missing price field.
 - `figure_summary.csv`: one row per minimum-stay group, with listing count,
   share among valid rules, valid price count, median, and 25th/75th percentiles.
-  Quantiles use R's default type 7. Boxes in the plot use base R `boxplot`
-  hinges; whiskers extend to the most extreme observations within 1.5 IQR of
-  the hinges, and dots show more extreme values. The y axis is logarithmic;
-  the price summaries themselves are calculated in TWD.
+  Summary quantiles use R's default type 7 in original TWD units. Figure 2 uses
+  `geom_boxplot()` and `scale_y_log10()`: ggplot2 computes its quartiles and
+  1.5-IQR whiskers on log10 prices; dots show observations beyond those whiskers.
+- `price_distribution_summary.csv`: one row describing all 5,868 usable quotes:
+  count, median, 25th/75th/90th percentiles, maximum (TWD), and the percentage
+  above TWD 10,000. Figure 1 uses histogram bins of width 0.1 in log10 TWD units,
+  corresponding to adjacent price boundaries about 26% apart. Counts sum to 5,868.
 
 ## Reproduction and limits
 
@@ -75,9 +80,11 @@ uniqueness, checks calendar joins and availability coding, parses prices, and wr
 the subsets. It reads UTF-8 text without conversion through the Windows locale.
 The remaining R chunks regenerate both figures and the summary CSV, and the
 QMD combines these with write-ups containing inline R statistics. All code is
-in the QMD, with no external R scripts. Default rendering uses the committed
-subset; `refresh_data:true` rebuilds it from the gzip files. Data processing and
-plotting use base R; rendering needs Quarto, knitr, rmarkdown, and XeLaTeX.
+in the QMD. The small `scripts/prepare_data.R` entry point executes the QMD's
+first two named chunks so data preparation can also run with Rscript without
+duplicating its logic. Default rendering uses the committed subset;
+`refresh_data:true` rebuilds it from the gzip files. Cleaning and summaries use
+dplyr; figures use ggplot2. Rendering needs Quarto, knitr, rmarkdown, and XeLaTeX.
 
 These are descriptive, cross-sectional visualizations. Advertised quote levels
 do not measure seasonal stability, transactions, revenue, or causal effects.
