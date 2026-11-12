@@ -1,0 +1,6 @@
+/data/raw/
+/tmp/
+.Rhistory
+.RData
+.quarto/
+/.Rproj.user/

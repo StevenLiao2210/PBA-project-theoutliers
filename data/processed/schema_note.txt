@@ -1,0 +1,3 @@
+Calendar columns:
+listing_id, date, available, minimum_nights, maximum_nights
+Calendar contains no date-level prices in this supplied release.
