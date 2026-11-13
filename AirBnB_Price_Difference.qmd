@@ -62,7 +62,7 @@ if (rebuild) {
   }
   listings_path <- file.path(raw_dir, "listings.csv.gz")
   calendar_path <- file.path(raw_dir, "calendar.csv.gz")
-  stopifnot(file.exists(listings_path), file.exists(calendar_path))
+  stopifnot(file.exists(listings_paths), file.exists(calendar_path))
   l <- read_gz(listings_path)
   c <- read_gz(calendar_path)
   needed <- c("id", "last_scraped", "minimum_nights", "price", "room_type",
@@ -185,8 +185,6 @@ Do Taipei Airbnb listings with longer minimum-night requirements exhibit smaller
 ## Data overview
 
 We use Inside Airbnb's **September 28, 2026 Taipei release**, comprising `r fmt(nrow(d))` listings scraped September 28-29. Each observation in these figures is a listing. The key explanatory variable is its general minimum-night requirement: `r fmt(stats$listings[1])` listings require 1-2 nights, `r fmt(stats$listings[2])` require 3-6, and `r fmt(stats$listings[3])` require 7+; one rule is missing.
-
-Our planned outcome is the within-listing percentage price difference between December 2026 and August 2027, provisionally chosen comparison periods. **That outcome is not available in these files:** the forward calendar covers `r audit_value("calendar_start")` to `r audit_value("calendar_end")` but contains no prices. These preliminary figures instead describe the available listing-level quoted nightly price in TWD, verified against the quote's currency. There are `r fmt(nrow(price_data))` positive usable quotes; `r fmt(sum(!d$valid_price))` listings lack one. Quotes refer to different check-in dates and stay lengths, not transactions.
 
 ## Figure 1: Distribution of quoted nightly prices
 
