@@ -19,6 +19,12 @@ It includes two figures built from the real September 28, 2026 Taipei release:
 1. Histogram of quoted nightly prices (5,868 listings).
 2. Boxplots of quoted prices by minimum-stay group (5,867 listings).
 
+Figure 2 separates minimum-stay requirements into 1-2, 3-6, 7-29,
+and 30+ nights. The accompanying
+`data/processed/stay_group_quality.csv` reports group sizes, usable
+prices, missing-price percentages, and median quoted prices.
+The report discusses the unequal price coverage across groups.
+
 Both use straightforward `ggplot2` styling, logarithmic price axes, and all eligible
 positive-price observations. The QMD uses `dplyr` pipelines for cleaning, filtering,
 grouping, and summaries.
