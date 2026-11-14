@@ -62,7 +62,7 @@ if (rebuild) {
   }
   listings_path <- file.path(raw_dir, "listings.csv.gz")
   calendar_path <- file.path(raw_dir, "calendar.csv.gz")
-  stopifnot(file.exists(listings_paths), file.exists(calendar_path))
+  stopifnot(file.exists(listings_path), file.exists(calendar_path))
   l <- read_gz(listings_path)
   c <- read_gz(calendar_path)
   needed <- c("id", "last_scraped", "minimum_nights", "price", "room_type",
@@ -130,6 +130,42 @@ d <- read.csv("data/processed/listings_subset.csv", colClasses = c(listing_id = 
     valid_rule = !is.na(stay_group),
     valid_price = is.finite(quoted_nightly_price_twd) & quoted_nightly_price_twd > 0
   )
+# Separate weekly-length and monthly-length minimum-stay rules.
+detailed_data <- d %>%
+  mutate(
+    detailed_stay_group = case_when(
+      is.na(minimum_nights) | minimum_nights < 1 ~ NA_character_,
+      minimum_nights <= 2 ~ "1-2 nights",
+      minimum_nights <= 6 ~ "3-6 nights",
+      minimum_nights <= 29 ~ "7-29 nights",
+      TRUE ~ "30+ nights"
+    ),
+    detailed_stay_group = factor(
+      detailed_stay_group,
+      levels = c("1-2 nights", "3-6 nights",
+                 "7-29 nights", "30+ nights")
+    )
+  )
+
+# Measure usable and missing/unusable prices within each group.
+stay_group_quality <- detailed_data %>%
+  filter(!is.na(detailed_stay_group)) %>%
+  group_by(detailed_stay_group) %>%
+  summarise(
+    total_listings = n(),
+    usable_prices = sum(valid_price),
+    missing_prices = sum(!valid_price),
+    missing_percent = 100 * mean(!valid_price),
+    median_twd = median(quoted_nightly_price_twd[valid_price]),
+    .groups = "drop"
+  )
+
+write.csv(
+  stay_group_quality,
+  "data/processed/stay_group_quality.csv",
+  row.names = FALSE
+)
+
 audit <- read.csv("data/processed/audit.csv", colClasses = "character")
 audit_value <- function(key) audit$value[match(key, audit$metric)]
 price_data <- d %>% filter(valid_price)
@@ -165,12 +201,29 @@ figure1 <- ggplot(price_data, aes(x = quoted_nightly_price_twd)) +
   scale_x_log10(breaks = price_breaks, labels = fmt) +
   labs(x = "Quoted nightly price (TWD, logarithmic scale)", y = "Number of listings") +
   plot_theme
-group_labels <- paste0(as.character(stats$stay_group), "\n(n = ", fmt(stats$valid_price_n), ")")
-figure2 <- ggplot(comparison_data, aes(x = stay_group, y = quoted_nightly_price_twd)) +
-  geom_boxplot(fill = "steelblue", outlier.alpha = .35, outlier.size = .8, linewidth = .4) +
+# Keep usable prices with a known minimum-stay group.
+comparison_detail <- detailed_data %>%
+  filter(valid_price, !is.na(detailed_stay_group))
+
+group_labels <- paste0(
+  as.character(stay_group_quality$detailed_stay_group),
+  "\n(n = ", fmt(stay_group_quality$usable_prices), ")"
+)
+
+figure2 <- ggplot(
+  comparison_detail,
+  aes(x = detailed_stay_group, y = quoted_nightly_price_twd)
+) +
+  geom_boxplot(
+    fill = "steelblue", outlier.alpha = .35,
+    outlier.size = .8, linewidth = .4
+  ) +
   scale_x_discrete(labels = group_labels) +
   scale_y_log10(breaks = price_breaks, labels = fmt) +
-  labs(x = "Listing-level minimum-stay requirement", y = "Quoted nightly price (TWD, log scale)") +
+  labs(
+    x = "Listing-level minimum-stay requirement",
+    y = "Quoted nightly price (TWD, log scale)"
+  ) +
   plot_theme
 # Check that the histogram includes every eligible real price.
 stopifnot(sum(ggplot_build(figure1)$data[[1]]$count) == nrow(price_data))
@@ -184,7 +237,7 @@ Do Taipei Airbnb listings with longer minimum-night requirements exhibit smaller
 
 ## Data overview
 
-We use Inside Airbnb's **September 28, 2026 Taipei release**, comprising `r fmt(nrow(d))` listings scraped September 28-29. Each observation in these figures is a listing. The key explanatory variable is its general minimum-night requirement: `r fmt(stats$listings[1])` listings require 1-2 nights, `r fmt(stats$listings[2])` require 3-6, and `r fmt(stats$listings[3])` require 7+; one rule is missing.
+We use Inside Airbnb's **September 28, 2026 Taipei release**, comprising `r fmt(nrow(d))` listings scraped September 28-29. Each observation is a listing. We group minimum-stay requirements into 1-2, 3-6, 7-29, and 30+ nights, separating the original 7+ category into two groups. One listing lacks a minimum-stay rule. Quoted prices refer to different check-in dates and stay lengths.
 
 ## Figure 1: Distribution of quoted nightly prices
 
@@ -210,9 +263,11 @@ The median quote is **TWD `r money(distribution$median_twd)`**, with the middle 
 figure2
 ```
 
-Median nightly quotes are **TWD `r money(stats$median_twd[1])`** for 1-2-night requirements, **TWD `r money(stats$median_twd[2])`** for 3-6 nights, and **TWD `r money(stats$median_twd[3])`** for 7+ nights. The first two groups have similar medians, while the 7+ group has a lower median. However, the distributions overlap and all groups contain high-price observations. This figure includes listings with both a positive quote and a valid rule; the one additional listing with a usable price but a missing rule is excluded. No eligible positive prices are trimmed.
+Median nightly quotes are **TWD `r money(stay_group_quality$median_twd[1])`** for 1-2-night requirements, **TWD `r money(stay_group_quality$median_twd[2])`** for 3-6 nights, **TWD `r money(stay_group_quality$median_twd[3])`** for 7-29 nights, and **TWD `r money(stay_group_quality$median_twd[4])`** for 30+ nights. The first two groups have similar medians. Separating the original 7+ category reveals a lower median for 30+ nights than for 7-29 nights, although their distributions overlap.
 
-The lower quote level for longer-stay listings motivates investigating whether these listings also maintain more stable prices across periods. It does **not** establish that their seasonal premiums are smaller. Differing quote dates, stay lengths, long-stay discounts, property types, and locations may explain the observed price-level differences. The broad 7+ category also combines weekly and monthly policies, suggesting a useful refinement for later comparisons.
+The figure includes `r fmt(nrow(comparison_detail))` listings with positive usable prices and known minimum-stay rules; no eligible positive prices are trimmed. Missing or unusable prices account for **`r sprintf("%.1f", stay_group_quality$missing_percent[1])`%, `r sprintf("%.1f", stay_group_quality$missing_percent[2])`%, `r sprintf("%.1f", stay_group_quality$missing_percent[3])`%, and `r sprintf("%.1f", stay_group_quality$missing_percent[4])`%** of all listings in the four respective groups. Longer-stay groups therefore have less complete price coverage. Their observed price distributions may not represent listings with missing quotes; the direction of any resulting bias is unknown.
+
+These findings motivate retaining separate 7-29 and 30+ groups and examining missing-price coverage in the planned analysis. Lower price levels do not establish smaller seasonal premiums. Differences in quote dates, stay lengths, discounts, room types, and locations may explain the observed patterns. Testing seasonal stability still requires suitable date-level prices.
 
 ## Planned analysis and feasibility
 
